@@ -1,0 +1,16 @@
+# Speed up Docker builds by excluding local/build artifacts
+.git
+.gitignore
+.github
+node_modules
+Dockerfile
+README.md
+*.swp
+*.swo
+*.tmp
+.log
+.out
+*.log
+*.out
+*.o
+*.so

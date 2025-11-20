@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test-udf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Oracle UDF image (amd64)
+        run: docker build --platform linux/amd64 -t simple-oracle-udf .
+
+      - name: Inspect for oci.h inside image (best effort)
+        run: |
+          docker run --rm --platform linux/amd64 --entrypoint /bin/sh simple-oracle-udf -c \
+            "command -v find >/dev/null 2>&1 && find / -name oci.h || echo 'find not available in image - skipping'"
+
+      - name: Run Oracle XE with UDF
+        run: docker run -d --name oracle-udf -e ORACLE_PASSWORD=TestPwd123 simple-oracle-udf
+
+      - name: Wait for database ready
+        run: |
+          timeout 600 bash -c '
+            until docker logs oracle-udf 2>&1 | grep -q "DATABASE IS READY TO USE"; do
+              sleep 10
+            done
+          '
+
+      - name: Install UDF (run SQL)
+        run: docker exec oracle-udf sh -c "sqlplus -s / as sysdba @/opt/oracle/udf/string_udf.sql"
+
+      - name: Smoke test UDF
+        run: |
+          set -e
+          output=$(docker exec oracle-udf sqlplus -s system/TestPwd123@localhost/XEPDB1 @/opt/oracle/udf/example.sql | tr -d '\r')
+          echo "$output"
+          echo "$output" | grep -q "Hello from the Oracle UDF!"
+
+      - name: Dump oracle container logs on failure
+        if: failure()
+        run: docker logs oracle-udf
